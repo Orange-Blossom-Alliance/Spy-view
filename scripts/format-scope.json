@@ -789,6 +789,8 @@
   "scripts/qa-director-interactions.mjs",
   "src/director/sharing/sharing.test.mjs",
   "scripts/qa-director-sharing.mjs",
+  "scripts/build-vancouver-cctv.mjs",
+  "src/data/vancouverCctvPack.test.mjs",
   "src/ui/weatherPanel.js",
   "src/ui/weatherPanel.test.mjs",
   "src/ui/railCards.js",
