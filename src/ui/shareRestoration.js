@@ -3,6 +3,22 @@ import { stampInitialShareGesture } from '../navigationPolicy.js';
 import { canPresentDeferredStatusNotice } from '../loadingFeedback.js';
 import { UiLifetime } from './uiLifetime.js';
 
+/** Wording shared with the other deferred share-restore notices. */
+export const INVALID_SHARE_LAYER_SELECTION_NOTICE =
+  'Shared layer selection could not be restored';
+
+/**
+ * Notice when a v2 share rejected its layer token set.
+ * Valid empty and known-token payloads stay silent. Unknown tokens are not salvaged.
+ * @param {{ layerStateInvalid?: boolean } | null | undefined} state
+ * @returns {string | null}
+ */
+export function invalidShareLayerSelectionNotice(state) {
+  return state?.layerStateInvalid === true
+    ? INVALID_SHARE_LAYER_SELECTION_NOTICE
+    : null;
+}
+
 /** Own initial share restoration, durable layer state and restoration notices. */
 export class ShareRestoration {
   constructor({
@@ -27,6 +43,7 @@ export class ShareRestoration {
     this._disposed = false;
     this._shareTrackingAcquiringKey = null;
     this._shareTrackingNoticeGeneration = 0;
+    this._pendingInvalidShareLayerNotice = null;
     this._initialShareState = null;
     this._initialShareNavigationGeneration = null;
     this._initialShareRestoreTimeout = null;
@@ -97,6 +114,14 @@ export class ShareRestoration {
           }
         })();
       }, 1500);
+      const invalidLayerNotice = invalidShareLayerSelectionNotice(savedState);
+      if (invalidLayerNotice) {
+        this._pendingInvalidShareLayerNotice = invalidLayerNotice;
+        this._scheduleDeferredShareNotice(
+          invalidLayerNotice,
+          ++this._shareTrackingNoticeGeneration,
+        );
+      }
     } else {
       this.syncShareState();
     }
@@ -207,13 +232,23 @@ export class ShareRestoration {
     if (
       result.classification === 'followed' ||
       result.classification === 'cancelled'
-    )
+    ) {
+      if (ownsAcquiringNotice && this._pendingInvalidShareLayerNotice) {
+        this._scheduleDeferredShareNotice(
+          this._pendingInvalidShareLayerNotice,
+          ++this._shareTrackingNoticeGeneration,
+        );
+      }
       return;
+    }
     // A stale terminal result must never replace a newer target's acquisition.
     if (this._shareTrackingAcquiringKey) return;
     const noticeGeneration = ownsAcquiringNotice
       ? this._shareTrackingNoticeGeneration
       : ++this._shareTrackingNoticeGeneration;
+    // A concrete tracking failure is more actionable than the generic
+    // rejected-layer warning when both happened in one shared link.
+    this._pendingInvalidShareLayerNotice = null;
     const subject = result.label || 'entity';
     const message =
       result.classification === 'expired'
@@ -221,6 +256,9 @@ export class ShareRestoration {
         : result.classification === 'source-unavailable'
           ? `Shared ${subject} could not be restored — feed unavailable`
           : `Shared ${subject} is unavailable`;
+    this._scheduleDeferredShareNotice(message, noticeGeneration);
+  }
+  _scheduleDeferredShareNotice(message, noticeGeneration) {
     const showAfterStartupCover = () => {
       this._lifetime.frame(() => {
         if (
@@ -282,6 +320,7 @@ export class ShareRestoration {
     this._disposed = true;
     this._shareTrackingNoticeGeneration += 1;
     this._shareTrackingAcquiringKey = null;
+    this._pendingInvalidShareLayerNotice = null;
     this._layerStateCoordinator?.destroy();
     this._layerStateCoordinator = null;
     this._layerStateRestorePromise = null;
